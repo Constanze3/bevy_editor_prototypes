@@ -17,7 +17,7 @@ use bevy::prelude::*;
 pub use bevy;
 
 use bevy_context_menu::ContextMenuPlugin;
-use bevy_editor_core::{EditorCorePlugin, SceneMarker};
+use bevy_editor_core::{EditorCorePlugin, SceneRootMarker};
 use bevy_editor_styles::StylesPlugin;
 
 // Panes
@@ -59,7 +59,7 @@ impl Plugin for EditorPlugin {
                 AssetBrowserPanePlugin,
                 LoadGltfPlugin,
             ))
-            .add_systems(Startup, dummy_setup);
+            .add_systems(Startup, build_scene);
     }
 }
 
@@ -90,28 +90,75 @@ impl App {
 }
 
 /// This is temporary, until we can load maps from the asset browser
-fn dummy_setup(
+fn dummy_setup(world: &mut World) {
+    let mut scene_world = World::new();
+
+    let type_registry = world.resource::<AppTypeRegistry>().clone();
+    scene_world.insert_resource(type_registry);
+
+    scene_world.init_resource::<Assets<Mesh>>();
+    scene_world.init_resource::<Assets<ColorMaterial>>();
+    scene_world.init_resource::<Assets<StandardMaterial>>();
+
+    let build_scene_system = scene_world.register_system(build_scene);
+    scene_world
+        .run_system(build_scene_system)
+        .expect("Failed to run build scene system.");
+
+    let mut scenes = world.get_resource_mut::<Assets<DynamicScene>>().unwrap();
+    let scene_handle = scenes.add(DynamicScene::from_world(&scene_world));
+
+    world.spawn((
+        Name::new("Scene Root"),
+        Transform::default(),
+        Visibility::default(),
+        DynamicSceneRoot(scene_handle),
+    ));
+}
+
+fn build_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials_2d: ResMut<Assets<ColorMaterial>>,
     mut materials_3d: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.spawn((
+        Mesh2d(meshes.add(Circle::new(50.0))),
+        MeshMaterial2d(materials_2d.add(Color::WHITE)),
+        Name::new("Circle"),
+    ));
+
     commands
-        .spawn((SceneMarker, Transform::default(), Visibility::default()))
-        .with_children(|parent| {
-            parent.spawn((
-                Mesh2d(meshes.add(Circle::new(50.0))),
-                MeshMaterial2d(materials_2d.add(Color::WHITE)),
-                Name::new("Circle"),
-            ));
+        .spawn((
+            Name::new("Scene Root"),
+            SceneRootMarker,
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .with_children(|commands| {
+            commands
+                .spawn((
+                    Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(1.5)))),
+                    MeshMaterial3d(materials_3d.add(Color::WHITE)),
+                    Name::new("Plane"),
+                ))
+                .with_children(|parent| {
+                    parent
+                        .spawn((
+                            Name::new("Plane Child"),
+                            Transform::default(),
+                            Visibility::default(),
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn((
+                                Name::new("Plane Child Child"),
+                                Transform::default(),
+                                Visibility::default(),
+                            ));
+                        });
+                });
 
-            parent.spawn((
-                Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(1.5)))),
-                MeshMaterial3d(materials_3d.add(Color::WHITE)),
-                Name::new("Plane"),
-            ));
-
-            parent.spawn((
+            commands.spawn((
                 DirectionalLight {
                     shadows_enabled: true,
                     ..default()

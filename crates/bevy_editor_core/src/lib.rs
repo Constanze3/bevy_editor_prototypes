@@ -31,4 +31,4 @@ pub fn reset_selected_entity_if_entity_despawned(
 }
 
 #[derive(Component)]
-pub struct SceneMarker;
+pub struct SceneRootMarker;

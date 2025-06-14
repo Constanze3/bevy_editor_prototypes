@@ -1,8 +1,12 @@
 //! An interactive, collapsible tree view for hierarchical ECS data in Bevy.
 
-use bevy::{app::Plugin, color::palettes::tailwind, prelude::*};
-use bevy_editor_core::{SceneMarker, SelectedEntity};
-use bevy_i_cant_believe_its_not_bsn::{on, template, Template, TemplateEntityCommandsExt};
+use bevy::{
+    app::Plugin, color::palettes::tailwind, picking::hover::PickingInteraction, prelude::*,
+};
+use bevy_editor_core::{SceneRootMarker, SelectedEntity};
+use bevy_i_cant_believe_its_not_bsn::{
+    on, template, Fragment, Template, TemplateEntityCommandsExt,
+};
 use bevy_pane_layout::prelude::{PaneAppExt, PaneStructure};
 
 /// Plugin for the editor scene tree pane.
@@ -41,7 +45,7 @@ struct SceneTreeNode(Entity);
 
 fn update_scene_tree(
     scene_tree_editor_query: Query<Entity, With<SceneTreeEditorRoot>>,
-    scene_query: Query<Entity, With<SceneMarker>>,
+    scene_query: Query<Entity, With<SceneRootMarker>>,
     spawn_nodes_query: Query<(Option<&Name>, Option<&Children>)>,
     selected_entity: Res<SelectedEntity>,
     mut commands: Commands,
@@ -53,7 +57,9 @@ fn update_scene_tree(
     for scene_tree_editor in scene_tree_editor_query.iter() {
         let screen_trees: Template = scene_query
             .iter()
-            .map(|root| scene_tree_nodes(root, &spawn_nodes_query, &selected_entity, &mut commands))
+            .map(|root| {
+                scene_tree_nodes(0, root, &spawn_nodes_query, &selected_entity, &mut commands)
+            })
             .flatten()
             .collect();
 
@@ -64,45 +70,49 @@ fn update_scene_tree(
 }
 
 fn scene_tree_nodes(
+    depth: u32,
     entity: Entity,
     query: &Query<(Option<&Name>, Option<&Children>)>,
     selected_entity: &SelectedEntity,
     commands: &mut Commands,
 ) -> Template {
+    let mut fragments: Vec<Fragment> = Vec::new();
+
     let (name, children) = query.get(entity).unwrap();
+
+    let name: String = name.map(Into::into).unwrap_or("<No Name>".into());
+    fragments.extend(template! {
+               {entity}: (
+                   SceneTreeNode(entity),
+                    Node {
+                        left: Val::Px(depth as f32 * 10.0),
+                        padding: UiRect::all(Val::Px(4.0)),
+                        align_items: AlignItems::Center,
+                        ..Default::default()
+                    },
+                    BorderRadius::all(Val::Px(4.0)),
+                    BackgroundColor(if selected_entity.0 == Some(entity) {
+                        tailwind::NEUTRAL_700.into()
+                    } else {
+                        Color::NONE
+                    }),
+               ) => [
+                    on(select_entity);
+                    (
+                        Text(name), TextFont::from_font_size(11.0), Pickable::IGNORE
+                    );
+               ];
+    });
 
     if let Some(children) = children {
         children
             .into_iter()
-            .map(|child| scene_tree_nodes(*child, query, selected_entity, commands))
+            .map(|child| scene_tree_nodes(depth + 1, *child, query, selected_entity, commands))
             .flatten()
-            .collect()
-    } else {
-        let name: String = name.map(Into::into).unwrap_or("<No Name>".into());
-
-        return template! {
-                   {entity}: (
-                       SceneTreeNode(entity),
-                        Node {
-                            padding: UiRect::all(Val::Px(4.0)),
-                            align_items: AlignItems::Center,
-                            ..Default::default()
-                        },
-                        BorderRadius::all(Val::Px(4.0)),
-                        BackgroundColor(if selected_entity.0 == Some(entity) {
-                            tailwind::NEUTRAL_700.into()
-                        } else {
-                            Color::NONE
-                        }),
-                   ) => [
-                        // TODO this observer doesn't seem to work
-                        on(select_entity);
-                        (
-                            Text(name), TextFont::from_font_size(11.0)
-                        );
-                   ];
-        };
+            .for_each(|fragment| fragments.push(fragment));
     }
+
+    return fragments;
 }
 
 fn deselect_entity(
