@@ -94,7 +94,7 @@ fn dummy_setup(world: &mut World) {
     let mut scene_world = World::new();
 
     let type_registry = world.resource::<AppTypeRegistry>().clone();
-    scene_world.insert_resource(type_registry);
+    scene_world.insert_resource(type_registry.clone());
 
     scene_world.init_resource::<Assets<Mesh>>();
     scene_world.init_resource::<Assets<ColorMaterial>>();
@@ -105,8 +105,13 @@ fn dummy_setup(world: &mut World) {
         .run_system(build_scene_system)
         .expect("Failed to run build scene system.");
 
+    let scene = DynamicScene::from_world(&scene_world);
+
+    // let serialized_scene = scene.serialize(&(type_registry.read())).unwrap();
+    // info!("{}", serialized_scene);
+
     let mut scenes = world.get_resource_mut::<Assets<DynamicScene>>().unwrap();
-    let scene_handle = scenes.add(DynamicScene::from_world(&scene_world));
+    let scene_handle = scenes.add(scene);
 
     world.spawn((
         Name::new("Scene Root"),

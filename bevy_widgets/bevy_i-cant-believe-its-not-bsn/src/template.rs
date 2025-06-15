@@ -293,6 +293,8 @@ pub enum Anchor {
 /// Receipts allow templates to intelligently update existing ecs structures.
 #[derive(Default, Component, Clone)]
 pub struct Receipt {
+    /// The anchor of the entity, if it has one.
+    pub anchor: Option<Anchor>,
     /// The components it inserted.
     components: HashSet<ComponentId>,
     /// The receipts of all the children, organized by name.
@@ -319,8 +321,11 @@ impl Fragment {
         // Build the children
         let anchors = self.children.build(entity_id, world, receipt.anchors);
 
+        let anchor = self.name.clone().map(Anchor::Named);
+
         // Place the new receipt onto the entity
         world.entity_mut(entity_id).insert(Receipt {
+            anchor,
             components,
             anchors,
         });

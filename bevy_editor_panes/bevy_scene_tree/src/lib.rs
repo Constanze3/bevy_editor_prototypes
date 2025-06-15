@@ -1,12 +1,8 @@
 //! An interactive, collapsible tree view for hierarchical ECS data in Bevy.
 
-use bevy::{
-    app::Plugin, color::palettes::tailwind, picking::hover::PickingInteraction, prelude::*,
-};
+use bevy::{app::Plugin, color::palettes::tailwind, prelude::*};
 use bevy_editor_core::{SceneRootMarker, SelectedEntity};
-use bevy_i_cant_believe_its_not_bsn::{
-    on, template, Fragment, Template, TemplateEntityCommandsExt,
-};
+use bevy_i_cant_believe_its_not_bsn::{on, template, Template, TemplateEntityCommandsExt};
 use bevy_pane_layout::prelude::{PaneAppExt, PaneStructure};
 
 /// Plugin for the editor scene tree pane.
@@ -15,7 +11,8 @@ pub struct SceneTreeEditorPlugin;
 impl Plugin for SceneTreeEditorPlugin {
     fn build(&self, app: &mut App) {
         app.register_pane("Scene Tree", setup_pane);
-        app.add_systems(PostUpdate, update_scene_tree);
+        app.add_systems(PostUpdate, build_scene_tree);
+        app.add_systems(PostUpdate, update_expansion_tile);
     }
 }
 
@@ -28,13 +25,7 @@ fn setup_pane(pane: In<PaneStructure>, mut commands: Commands) {
         .entity(pane.content)
         .insert((
             SceneTreeEditorRoot,
-            Node {
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                column_gap: Val::Px(2.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                ..Default::default()
-            },
+            Node::default(),
             BackgroundColor(tailwind::NEUTRAL_600.into()),
         ))
         .observe(deselect_entity);
@@ -43,13 +34,18 @@ fn setup_pane(pane: In<PaneStructure>, mut commands: Commands) {
 #[derive(Component)]
 struct SceneTreeNode(Entity);
 
-fn update_scene_tree(
+fn build_scene_tree(
+    keyboard: Res<ButtonInput<KeyCode>>,
     scene_tree_editor_query: Query<Entity, With<SceneTreeEditorRoot>>,
     scene_query: Query<Entity, With<SceneRootMarker>>,
     spawn_nodes_query: Query<(Option<&Name>, Option<&Children>)>,
     selected_entity: Res<SelectedEntity>,
     mut commands: Commands,
 ) {
+    if !keyboard.just_pressed(KeyCode::KeyT) {
+        return;
+    }
+
     if scene_tree_editor_query.is_empty() {
         return;
     }
@@ -57,9 +53,7 @@ fn update_scene_tree(
     for scene_tree_editor in scene_tree_editor_query.iter() {
         let screen_trees: Template = scene_query
             .iter()
-            .map(|root| {
-                scene_tree_nodes(0, root, &spawn_nodes_query, &selected_entity, &mut commands)
-            })
+            .map(|root| scene_tree_nodes(root, &spawn_nodes_query, &selected_entity, &mut commands))
             .flatten()
             .collect();
 
@@ -70,49 +64,138 @@ fn update_scene_tree(
 }
 
 fn scene_tree_nodes(
-    depth: u32,
     entity: Entity,
     query: &Query<(Option<&Name>, Option<&Children>)>,
     selected_entity: &SelectedEntity,
     commands: &mut Commands,
 ) -> Template {
-    let mut fragments: Vec<Fragment> = Vec::new();
-
     let (name, children) = query.get(entity).unwrap();
 
+    let children_template = {
+        if let Some(children) = children {
+            children
+                .into_iter()
+                .map(|child| scene_tree_nodes(*child, query, selected_entity, commands))
+                .flatten()
+                .collect()
+        } else {
+            template! {}
+        }
+    };
+
     let name: String = name.map(Into::into).unwrap_or("<No Name>".into());
-    fragments.extend(template! {
-               {entity}: (
-                   SceneTreeNode(entity),
-                    Node {
-                        left: Val::Px(depth as f32 * 10.0),
-                        padding: UiRect::all(Val::Px(4.0)),
-                        align_items: AlignItems::Center,
-                        ..Default::default()
-                    },
-                    BorderRadius::all(Val::Px(4.0)),
-                    BackgroundColor(if selected_entity.0 == Some(entity) {
-                        tailwind::NEUTRAL_700.into()
-                    } else {
-                        Color::NONE
-                    }),
-               ) => [
-                    on(select_entity);
-                    (
-                        Text(name), TextFont::from_font_size(11.0), Pickable::IGNORE
-                    );
-               ];
-    });
 
-    if let Some(children) = children {
-        children
-            .into_iter()
-            .map(|child| scene_tree_nodes(depth + 1, *child, query, selected_entity, commands))
-            .flatten()
-            .for_each(|fragment| fragments.push(fragment));
+    if 0 < children_template.len() {
+        return template! {
+            @{expansion_tile(name, children_template, entity, selected_entity.0)};
+        };
+    } else {
+        return template! {
+            (Node {
+                padding: UiRect::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                ..Default::default()
+            }) => [
+                on(select_entity);
+                (Text(name), TextFont::from_font_size(11.0), Pickable::IGNORE);
+            ];
+        };
     }
+}
 
-    return fragments;
+#[derive(Component)]
+#[require(ExpansionTileFolded)]
+struct ExpansionTile;
+
+#[derive(Component, Default)]
+struct ExpansionTileFolded(bool);
+
+#[derive(Component)]
+struct ExpansionTileChildren;
+
+fn expansion_tile(
+    title: String,
+    children: Template,
+    entity: Entity,
+    selected_entity: Option<Entity>,
+) -> Template {
+    template! {
+        (
+            ExpansionTile,
+            Node {
+                flex_direction: FlexDirection::Column,
+                ..Default::default()
+            },
+            SceneTreeNode(entity),
+            BackgroundColor(if selected_entity == Some(entity) {
+                tailwind::NEUTRAL_700.into()
+            } else {
+                Color::NONE
+            }),
+
+        ) => [
+            (Node {
+                padding: UiRect::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                ..Default::default()
+            }) => [
+                on(toggle_expansion_tile);
+                // on(select_entity);
+                (Text(title), TextFont::from_font_size(11.0), Pickable::IGNORE);
+            ];
+            (
+                // this depends
+                ExpansionTileChildren,
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    column_gap: Val::Px(2.0),
+                    left: Val::Px(5.0),
+                    ..default()
+                }
+            ) => [
+                @{ children };
+            ];
+        ];
+
+    }
+}
+
+fn toggle_expansion_tile(
+    trigger: Trigger<Pointer<Click>>,
+    mut parent_query: Query<&ChildOf>,
+    mut folded_query: Query<&mut ExpansionTileFolded>,
+) {
+    let parent = parent_query.get_mut(trigger.target).unwrap().0;
+    let mut folded = folded_query.get_mut(parent).unwrap();
+
+    folded.0 = !folded.0;
+}
+
+fn update_expansion_tile(
+    query: Query<(&ExpansionTileFolded, &Children), Changed<ExpansionTileFolded>>,
+    etc_query: Query<(), With<ExpansionTileChildren>>,
+    mut node_query: Query<&mut Node>,
+) {
+    for (folded, folded_children) in query.iter() {
+        // Find the first child with the ExpansionTileChildren component.
+        let children_root = folded_children
+            .iter()
+            .filter(|child| etc_query.get(*child).is_ok())
+            .next();
+
+        let Some(children_root) = children_root else {
+            panic!("Expansion tile should have ExpansionTileChildren as a child");
+        };
+
+        let display = match folded.0 {
+            true => Display::None,
+            false => Display::Flex,
+        };
+
+        let mut node = node_query.get_mut(children_root).unwrap();
+        node.display = display;
+    }
 }
 
 fn deselect_entity(
