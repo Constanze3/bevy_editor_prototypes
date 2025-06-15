@@ -45,7 +45,24 @@ impl Fragment {
     /// It may modify the entity itself and some or all of its children.
     /// A [`Receipt`] is stored on the entity to track what was built, enabling incremental updates.
     pub fn build(self, entity: Entity, world: &mut World) {
-        self.build_nonexistent(entity, world, true);
+        // Clone the receipt for the targeted entity.
+        let receipt = world
+            .get::<Receipt>(entity)
+            .map(ToOwned::to_owned)
+            .unwrap_or_default();
+
+        // Build the bundle. Insert new components, replace existing ones and remove components
+        // that are no longer needed.
+        let components = self.bundle.inner.build(entity, world, receipt.components);
+
+        // Build the children.
+        let anchors = self.children.build(entity, world, receipt.anchors);
+
+        // Place the new receipt onto the entity.
+        world.entity_mut(entity).insert(Receipt {
+            components,
+            anchors,
+        });
     }
 
     /// Builds only the nonexistent parts of this fragment on the given entity.
