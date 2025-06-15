@@ -43,6 +43,24 @@ fn build_scene_tree(
     mut commands: Commands,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyT) {
+        if keyboard.just_pressed(KeyCode::KeyA) {
+            let scene = scene_query.single().unwrap();
+            let child = spawn_nodes_query
+                .get(scene)
+                .unwrap()
+                .1
+                .unwrap()
+                .iter()
+                .next()
+                .unwrap();
+
+            commands.entity(child).with_child((
+                Transform::default(),
+                Visibility::default(),
+                Name::new("Dummy"),
+            ));
+        }
+
         return;
     }
 
@@ -59,7 +77,7 @@ fn build_scene_tree(
 
         commands
             .entity(scene_tree_editor)
-            .build_children(screen_trees);
+            .build_nonexistent_children(screen_trees);
     }
 }
 
